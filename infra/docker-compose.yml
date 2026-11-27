@@ -1,0 +1,71 @@
+# Glean 拾零 - 本地开发依赖
+# 依据 docs/概要设计-初稿.md 5.2.2 技术选型：PostgreSQL 16 / Redis 7 / MinIO
+# 用法：docker compose -f infra/docker-compose.yml up -d
+name: glean-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: glean-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: glean
+      POSTGRES_USER: glean
+      POSTGRES_PASSWORD: glean_dev_pwd
+      # 中文排序/大小写不敏感检索留给应用层处理，dev 保持默认 locale
+      TZ: Asia/Shanghai
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U glean -d glean"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    container_name: glean-redis
+    restart: unless-stopped
+    # appendonly 对应概要设计 829 行：Stream 做事件总线，需要 AOF 兜底
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    # 默认不启动（profiles: storage）。原因：账号登录阶段用不到对象存储，
+    # 且 minio/minio:latest 已从 Docker Hub 下架，需要时再确认镜像来源。
+    profiles: ["storage"]
+    image: minio/minio:latest
+    container_name: glean-minio
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: glean
+      MINIO_ROOT_PASSWORD: glean_dev_pwd
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web 控制台
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:
