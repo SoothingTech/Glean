@@ -1,0 +1,97 @@
+### Glean 账号与授权自测（5.7.3.2 全量接口）
+### 用 IDEA 内置 HTTP Client 发送；成功响应统一为 {"code":"0","data":...}
+@host = http://localhost:8080/api/v1
+@phone = 13800000000
+
+### 1. 下发验证码（开发环境固定 123456）
+POST {{host}}/auth/sms-code
+Content-Type: application/json
+
+{ "phone": "{{phone}}" }
+
+### 2. 登录（deviceId 对应 JWT 的 dev claim）
+POST {{host}}/auth/login
+Content-Type: application/json
+
+{
+  "phone": "{{phone}}",
+  "code": "123456",
+  "deviceId": "dev-A",
+  "platform": "Android"
+}
+
+### 3. 当前身份
+# 注意：lvl 取自令牌，可能滞后于库中授权级别
+GET {{host}}/auth/me
+Authorization: Bearer {{access_token}}
+
+### 4. 当前授权（默认 L1）
+GET {{host}}/consent
+Authorization: Bearer {{access_token}}
+
+### 5. 升到 L3（累进：L3 含 L2 能力）
+PUT {{host}}/consent
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "level": "L3",
+  "scope": {
+    "notifyApps": ["com.tencent.mm", "com.taobao.taobao", "com.jd.jd"],
+    "qqGroups": ["123456789", "987654321"],
+    "quietHours": ["23:00", "07:00"]
+  },
+  "clientRequestId": "k-1"
+}
+
+### 6. 降到 L1 —— 响应里的 revoked 就是撤回影响面
+PUT {{host}}/consent
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "level": "L1",
+  "scope": {
+    "notifyApps": ["com.tencent.mm"],
+    "qqGroups": [],
+    "quietHours": ["23:00", "07:00"]
+  },
+  "clientRequestId": "k-2"
+}
+
+### 7. 幂等：同键不同载荷 → 409 E5004
+PUT {{host}}/consent
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "level": "L2",
+  "scope": { "qqGroups": ["123456789"] },
+  "clientRequestId": "k-2"
+}
+
+### 8. 设备列表
+GET {{host}}/devices
+Authorization: Bearer {{access_token}}
+
+### 9. 远程下线（幂等，重复调用仍 204）
+DELETE {{host}}/devices/dev-B
+Authorization: Bearer {{access_token}}
+
+### 10. 本人审计（游标分页）
+GET {{host}}/audit?limit=3
+Authorization: Bearer {{access_token}}
+
+### 11. 审计翻页：把上一页的 nextCursor 填进来
+GET {{host}}/audit?limit=3&cursor={{next_cursor}}
+Authorization: Bearer {{access_token}}
+
+### 12. 刷新令牌
+POST {{host}}/auth/refresh
+Content-Type: application/json
+
+{ "refreshToken": "{{refresh_token}}" }
+
+### 13. 登出（幂等；同设备 refresh token 一并失效）
+POST {{host}}/auth/logout
+Authorization: Bearer {{access_token}}
